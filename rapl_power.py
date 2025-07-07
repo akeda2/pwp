@@ -2,16 +2,23 @@
 """
 rapl_power.py  –  Lightweight Intel RAPL power monitor
 
-Outputs (per socket)
+Outputs (per socket):
   • Package power (W)
   • Power per core (W)
   • Average effective clock (MHz)
   • Power per core per MHz (µW / MHz)
 
-Usage examples
-  sudo python3 rapl_power.py           # plain table, 1 s interval
-  sudo python3 rapl_power.py 0.5 -j    # JSON every 0.5 s
-  sudo python3 rapl_power.py -j | jq   # pretty-print with jq
+Display modes
+  default        – append rows forever (what you already had)
+  --max-lines N  – keep at most N data rows, then clear screen & redraw header
+  --fullscreen   – rewrite the same rows in-place (no vertical growth)
+  --json (-j)    – emit one JSON object per sample (machine-readable)
+
+Examples
+  sudo python3 rapl_power.py
+  sudo python3 rapl_power.py 0.5 --max-lines 20
+  sudo python3 rapl_power.py --fullscreen
+  sudo python3 rapl_power.py -j | jq
 
 Requires read access to
   /sys/class/powercap/intel-rapl*/energy_uj
@@ -22,6 +29,7 @@ import glob
 import json
 import os
 import re
+import sys
 import time
 from collections import defaultdict
 from typing import Dict, List
@@ -91,9 +99,31 @@ def read_freq_khz(cpu: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# Terminal helpers                                                            #
+# --------------------------------------------------------------------------- #
+CSI = "\033["  # Control-Sequence Introducer (ANSI)
+
+def clear_screen() -> None:
+    """Clear screen & move cursor to 1;1."""
+    sys.stdout.write(CSI + "2J" + CSI + "H")
+
+def cursor_up(lines: int) -> None:
+    """Move cursor up *lines* rows."""
+    if lines > 0:
+        sys.stdout.write(CSI + f"{lines}A")
+
+
+# --------------------------------------------------------------------------- #
 # Main sampling loop                                                          #
 # --------------------------------------------------------------------------- #
-def sample(interval: float, json_mode: bool) -> None:
+def sample(interval: float,
+           json_mode: bool,
+           max_lines: int | None,
+           fullscreen: bool) -> None:
+
+    if json_mode and (max_lines or fullscreen):
+        raise SystemExit("JSON mode is incompatible with --max-lines / --fullscreen")
+
     pkgs = list_packages()
     if not pkgs:
         raise RuntimeError("No RAPL package zones found – is this an Intel CPU?")
@@ -105,13 +135,15 @@ def sample(interval: float, json_mode: bool) -> None:
 
     sockets = cores_by_socket()
 
+    header = (
+        f"{'Socket':>6} | {'Pkg W':>10} | {'W/core':>10} | "
+        f"{'Avg MHz':>10} | {'µW/MHz':>12}"
+    )
+
     if not json_mode:
-        hdr = (
-            f"{'Socket':>6} | {'Pkg W':>10} | {'W/core':>10} | "
-            f"{'Avg MHz':>10} | {'µW/MHz':>12}"
-        )
-        print(hdr)
-        print("-" * len(hdr))
+        print(header)
+        print("-" * len(header))
+        printed_data_rows = 0
 
     while True:
         time.sleep(interval)
@@ -153,13 +185,18 @@ def sample(interval: float, json_mode: bool) -> None:
                     "uw_per_mhz": round(uw_per_mhz, 1),
                 }
             else:
-                print(
+                line = (
                     f"{socket_id:6} | "
                     f"{power_w:8.2f} W | "
                     f"{w_per_core:8.3f} W | "
                     f"{avg_mhz:8.0f} MHz | "
                     f"{uw_per_mhz:10.1f} µW/MHz"
                 )
+                if fullscreen:
+                    print(line)
+                else:
+                    print(line)
+                    printed_data_rows += 1
 
         if json_mode:
             blob = {
@@ -168,8 +205,19 @@ def sample(interval: float, json_mode: bool) -> None:
                 "sockets": measurements,
             }
             print(json.dumps(blob))
-        else:
-            print()
+
+        elif fullscreen:
+            # Move cursor back up (#pkgs) rows to overwrite on next loop
+            cursor_up(len(pkgs))
+
+        elif max_lines and printed_data_rows >= max_lines:
+            # Reset the “page”
+            clear_screen()
+            print(header)
+            print("-" * len(header))
+            printed_data_rows = 0
+
+        sys.stdout.flush()
 
 
 # --------------------------------------------------------------------------- #
@@ -185,14 +233,30 @@ if __name__ == "__main__":
         help="sampling interval in seconds (default: 1.0)",
     )
     parser.add_argument(
-        "-j",
-        "--json",
+        "-j", "--json",
         action="store_true",
-        help="output each sample as a JSON object instead of a table",
+        help="output each sample as a JSON object (disables table modes)",
+    )
+    parser.add_argument(
+        "--max-lines",
+        type=int,
+        metavar="N",
+        help="print at most N data rows, then clear screen & redraw header "
+             "(table mode only)",
+    )
+    parser.add_argument(
+        "--fullscreen",
+        action="store_true",
+        help="rewrite the same screenful in place (no vertical growth)",
     )
     args = parser.parse_args()
 
     try:
-        sample(args.interval, args.json)
+        sample(
+            interval=args.interval,
+            json_mode=args.json,
+            max_lines=args.max_lines,
+            fullscreen=args.fullscreen,
+        )
     except KeyboardInterrupt:
         pass
