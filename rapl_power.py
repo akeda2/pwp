@@ -171,6 +171,8 @@ def sample(
     )
 
     if not json_mode:
+        if fullscreen:
+            clear_screen()
         print(header)
         print("-" * len(header))
         printed_rows = 0
