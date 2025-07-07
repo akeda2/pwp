@@ -4,21 +4,25 @@ rapl_power.py  –  Lightweight Intel RAPL power monitor
 
 Outputs (per socket):
   • Package power (W)
-  • Power per core (W)
+  • Power per PHYSICAL core   (default)   or per logical thread (use -l)
   • Average effective clock (MHz)
   • Power per core per MHz (µW / MHz)
 
 Display modes
-  default        – append rows forever (what you already had)
+  default        – append rows forever
   --max-lines N  – keep at most N data rows, then clear screen & redraw header
   --fullscreen   – rewrite the same rows in-place (no vertical growth)
   --json (-j)    – emit one JSON object per sample (machine-readable)
 
+Normalisation
+  default            – divide by physical cores (best when SMT is on)
+  --logical / -l     – divide by logical threads instead
+
 Examples
   sudo python3 rapl_power.py
-  sudo python3 rapl_power.py 0.5 --max-lines 20
+  sudo python3 rapl_power.py -l 0.5 --max-lines 30
   sudo python3 rapl_power.py --fullscreen
-  sudo python3 rapl_power.py -j | jq
+  sudo python3 rapl_power.py --logical --json | jq
 
 Requires read access to
   /sys/class/powercap/intel-rapl*/energy_uj
@@ -35,11 +39,10 @@ from collections import defaultdict
 from typing import Dict, List
 
 ENERGY_PATH_GLOB = "/sys/class/powercap/intel-rapl/intel-rapl:*"
-CPU_TOPOLOGY_GLOB = (
-    "/sys/devices/system/cpu/cpu[0-9]*/topology/physical_package_id"
-)
+CPU_TOPOLOGY_GLOB = "/sys/devices/system/cpu/cpu[0-9]*"
 
 _cpu_re = re.compile(r"cpu(\d+)")
+CSI = "\033["  # ANSI control-sequence introducer
 
 
 # --------------------------------------------------------------------------- #
@@ -64,14 +67,33 @@ def list_packages() -> List[str]:
     return pkgs
 
 
-def cores_by_socket() -> Dict[int, List[int]]:
-    mapping: Dict[int, List[int]] = defaultdict(list)
-    for topo_path in glob.glob(CPU_TOPOLOGY_GLOB):
-        cpu_id = cpu_id_from_path(topo_path)
-        with open(topo_path) as f:
-            socket_id = int(f.read().strip())
-        mapping[socket_id].append(cpu_id)
-    return mapping
+def threads_and_physical_cores_by_socket() -> tuple[
+    Dict[int, List[int]], Dict[int, set[int]]
+]:
+    """
+    Return two mappings:
+      • socket → list of logical CPU ids
+      • socket → set of physical core ids
+    """
+    threads: Dict[int, List[int]] = defaultdict(list)
+    phys: Dict[int, set[int]] = defaultdict(set)
+
+    for cpu_dir in glob.glob(CPU_TOPOLOGY_GLOB):
+        cpu = cpu_id_from_path(cpu_dir)
+
+        topo_dir = os.path.join(cpu_dir, "topology")
+        try:
+            with open(os.path.join(topo_dir, "physical_package_id")) as f:
+                socket = int(f.read().strip())
+            with open(os.path.join(topo_dir, "core_id")) as f:
+                core_id = int(f.read().strip())
+        except FileNotFoundError:
+            continue  # topology not available
+
+        threads[socket].append(cpu)
+        phys[socket].add(core_id)
+
+    return threads, phys
 
 
 def read_energy_uj(fd: int) -> int:
@@ -95,20 +117,17 @@ def read_freq_khz(cpu: int) -> int:
                 return int(float(f.read().strip()))
         except FileNotFoundError:
             continue
-    return 0  # governor disabled / cpufreq not present
+    return 0  # cpufreq not available
 
 
 # --------------------------------------------------------------------------- #
 # Terminal helpers                                                            #
 # --------------------------------------------------------------------------- #
-CSI = "\033["  # Control-Sequence Introducer (ANSI)
-
 def clear_screen() -> None:
-    """Clear screen & move cursor to 1;1."""
     sys.stdout.write(CSI + "2J" + CSI + "H")
 
+
 def cursor_up(lines: int) -> None:
-    """Move cursor up *lines* rows."""
     if lines > 0:
         sys.stdout.write(CSI + f"{lines}A")
 
@@ -116,11 +135,13 @@ def cursor_up(lines: int) -> None:
 # --------------------------------------------------------------------------- #
 # Main sampling loop                                                          #
 # --------------------------------------------------------------------------- #
-def sample(interval: float,
-           json_mode: bool,
-           max_lines: int | None,
-           fullscreen: bool) -> None:
-
+def sample(
+    interval: float,
+    json_mode: bool,
+    logical: bool,
+    max_lines: int | None,
+    fullscreen: bool,
+) -> None:
     if json_mode and (max_lines or fullscreen):
         raise SystemExit("JSON mode is incompatible with --max-lines / --fullscreen")
 
@@ -133,17 +154,26 @@ def sample(interval: float,
     last_energy = {pkg: read_energy_uj(fd) for pkg, fd in fds.items()}
     last_time_ns = time.monotonic_ns()
 
-    sockets = cores_by_socket()
+    threads_map, phys_map = threads_and_physical_cores_by_socket()
 
+    # SMT hint when user chooses logical mode
+    hyper = any(len(threads_map[s]) > len(phys_map[s]) for s in threads_map)
+    if hyper and logical and not json_mode:
+        print(
+            "[hint] SMT detected – using logical-thread normalisation "
+            "(power divided by logical threads).\n"
+        )
+
+    core_label = "l-core" if logical else "p-core"
     header = (
-        f"{'Socket':>6} | {'Pkg W':>10} | {'W/core':>10} | "
-        f"{'Avg MHz':>10} | {'µW/MHz':>12}"
+        f"{'Socket':>6} | {'Pkg W':>10} | "
+        f"{'W/' + core_label:>10} | {'Avg MHz':>10} | {'µW/MHz':>12}"
     )
 
     if not json_mode:
         print(header)
         print("-" * len(header))
-        printed_data_rows = 0
+        printed_rows = 0
 
     while True:
         time.sleep(interval)
@@ -152,24 +182,26 @@ def sample(interval: float,
         last_time_ns = now_ns
 
         measurements = {}
-
         for pkg in pkgs:
             new_energy = read_energy_uj(fds[pkg])
             old_energy = last_energy[pkg]
             rng = ranges[pkg]
-            if new_energy < old_energy:
+            if new_energy < old_energy:  # wrap-around
                 new_energy += rng
             diff_j = (new_energy - old_energy) / 1e6
             last_energy[pkg] = new_energy
             power_w = diff_j / dt
 
-            socket_id = int(pkg.split(":")[1].split("/")[0])
-            core_list = sockets.get(socket_id, [])
-            ncores = len(core_list) or 1
+            socket = int(pkg.split(":")[1].split("/")[0])
+            logical_list = threads_map.get(socket, [])
+            phys_set = phys_map.get(socket, set())
+
+            ncores = len(logical_list) if logical else len(phys_set)
+            ncores = ncores or 1  # avoid div-zero
 
             freqs_mhz = [
                 read_freq_khz(c) / 1000
-                for c in core_list
+                for c in logical_list
                 if read_freq_khz(c)
             ]
             avg_mhz = sum(freqs_mhz) / len(freqs_mhz) if freqs_mhz else 0
@@ -178,7 +210,7 @@ def sample(interval: float,
             uw_per_mhz = (w_per_core * 1e6) / avg_mhz if avg_mhz else 0
 
             if json_mode:
-                measurements[str(socket_id)] = {
+                measurements[str(socket)] = {
                     "pkg_w": round(power_w, 3),
                     "w_per_core": round(w_per_core, 4),
                     "avg_mhz": round(avg_mhz),
@@ -186,36 +218,29 @@ def sample(interval: float,
                 }
             else:
                 line = (
-                    f"{socket_id:6} | "
-                    f"{power_w:8.2f} W | "
-                    f"{w_per_core:8.3f} W | "
-                    f"{avg_mhz:8.0f} MHz | "
-                    f"{uw_per_mhz:10.1f} µW/MHz"
+                    f"{socket:6} | {power_w:8.2f} W | {w_per_core:8.3f} W | "
+                    f"{avg_mhz:8.0f} MHz | {uw_per_mhz:10.1f} µW/MHz"
                 )
-                if fullscreen:
-                    print(line)
-                else:
-                    print(line)
-                    printed_data_rows += 1
+                print(line)
+                printed_rows += 1
 
         if json_mode:
             blob = {
                 "timestamp": time.time(),
                 "interval": interval,
+                "core_mode": "logical" if logical else "physical",
                 "sockets": measurements,
             }
             print(json.dumps(blob))
 
         elif fullscreen:
-            # Move cursor back up (#pkgs) rows to overwrite on next loop
             cursor_up(len(pkgs))
 
-        elif max_lines and printed_data_rows >= max_lines:
-            # Reset the “page”
+        elif max_lines and printed_rows >= max_lines:
             clear_screen()
             print(header)
             print("-" * len(header))
-            printed_data_rows = 0
+            printed_rows = 0
 
         sys.stdout.flush()
 
@@ -231,6 +256,11 @@ if __name__ == "__main__":
         default=1.0,
         type=float,
         help="sampling interval in seconds (default: 1.0)",
+    )
+    parser.add_argument(
+        "-l", "--logical",
+        action="store_true",
+        help="divide power by logical threads instead of physical cores",
     )
     parser.add_argument(
         "-j", "--json",
@@ -255,6 +285,7 @@ if __name__ == "__main__":
         sample(
             interval=args.interval,
             json_mode=args.json,
+            logical=args.logical,
             max_lines=args.max_lines,
             fullscreen=args.fullscreen,
         )
