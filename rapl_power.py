@@ -166,8 +166,8 @@ def sample(
 
     core_label = "l-core" if logical else "p-core"
     header = (
-        f"{'Socket':>6} | {'Pkg W':>10} | "
-        f"{'W/' + core_label:>10} | {'Avg MHz':>10} | {'µW/MHz':>12}"
+        f"{'Socket':>6} | {'Pkg W':>7} | "
+        f"{'W/' + core_label:>8} | {'Avg MHz':>8} | {'µW/MHz':>13}"
     )
 
     if not json_mode:
@@ -220,8 +220,8 @@ def sample(
                 }
             else:
                 line = (
-                    f"{socket:6} | {power_w:8.2f} W | {w_per_core:8.3f} W | "
-                    f"{avg_mhz:8.0f} MHz | {uw_per_mhz:10.1f} µW/MHz"
+                    f"{socket:6} | {power_w:4.2f} W |  {w_per_core:4.3f} W | "
+                    f"{avg_mhz:4.0f} MHz | {uw_per_mhz:5.1f} µW/MHz"
                 )
                 print(line)
                 printed_rows += 1
