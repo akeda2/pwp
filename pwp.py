@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 -u
 """
 pwp  –  Lightweight Intel RAPL power monitor
 
