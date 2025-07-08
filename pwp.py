@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-rapl_power.py  –  Lightweight Intel RAPL power monitor
+pwp  –  Lightweight Intel RAPL power monitor
 
 Outputs (per socket):
   • Package power (W)
@@ -19,10 +19,10 @@ Normalisation
   --logical / -l     – divide by logical threads instead
 
 Examples
-  sudo python3 rapl_power.py
-  sudo python3 rapl_power.py -l 0.5 --max-lines 30
-  sudo python3 rapl_power.py --fullscreen
-  sudo python3 rapl_power.py --logical --json | jq
+  sudo python3 pwp
+  sudo python3 pwp -l 0.5 --max-lines 30
+  sudo python3 pwp --fullscreen
+  sudo python3 pwp --logical --json | jq
 
 Requires read access to
   /sys/class/powercap/intel-rapl*/energy_uj
