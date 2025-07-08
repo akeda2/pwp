@@ -270,17 +270,17 @@ if __name__ == "__main__":
         help="output each sample as a JSON object (disables table modes)",
     )
     parser.add_argument(
-        "--max-lines",
+        "-m", "--max-lines",
         type=int,
         metavar="N",
         default=20,
-        help="print at most N data rows, then clear screen & redraw header "
+        help="print at most N lines, (default: 20) "
              "(table mode only)",
     )
     parser.add_argument(
         "--fullscreen",
         action="store_true",
-        help="rewrite the same screenful in place (no vertical growth)",
+        help="rewrite new data in place (no vertical growth)",
     )
     args = parser.parse_args()
 
