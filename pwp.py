@@ -41,6 +41,13 @@ from typing import Dict, List
 ENERGY_PATH_GLOB = "/sys/class/powercap/intel-rapl/intel-rapl:*"
 CPU_TOPOLOGY_GLOB = "/sys/devices/system/cpu/cpu[0-9]*"
 
+# ------- fixed column widths (incl. units) ---------------------------------
+COL_SOCKET   = 6
+COL_PKG      = 9   # "9999.99 W"
+COL_CORE     = 9   # "  12.345 W"
+COL_AVG_MHZ  = 10   # "  4200 MHz"
+COL_UW_MHZ   = 14   # " 1234.5 µW/MHz"
+
 _cpu_re = re.compile(r"cpu(\d+)")
 CSI = "\033["  # ANSI control-sequence introducer
 
@@ -48,6 +55,10 @@ CSI = "\033["  # ANSI control-sequence introducer
 # --------------------------------------------------------------------------- #
 # Helper functions                                                            #
 # --------------------------------------------------------------------------- #
+def cell(num_str: str, unit: str, width: int) -> str:
+    """Return '<num> <unit>' right-justified to *width*."""
+    return f"{num_str} {unit}".rjust(width)
+
 def cpu_id_from_path(path: str) -> int:
     m = _cpu_re.search(path)
     if not m:
@@ -165,9 +176,16 @@ def sample(
         )
 
     core_label = "l-core" if logical else "p-core"
-    header = (
+    """header = (
         f"{'Socket':>6} | {'Pkg W':>7} | "
         f"{'W/' + core_label:>8} | {'Avg MHz':>8} | {'µW/MHz':>13}"
+    )"""
+    header = (
+        f"{'Socket':>{COL_SOCKET}} |"
+        f"{'Pkg W':>{COL_PKG}} |"
+        f"{'W/' + core_label:>{COL_CORE}} |"
+        f"{'Avg MHz':>{COL_AVG_MHZ}} |"
+        f"{'µW/MHz':>{COL_UW_MHZ}}"
     )
 
     if not json_mode:
@@ -219,9 +237,16 @@ def sample(
                     "uw_per_mhz": round(uw_per_mhz, 1),
                 }
             else:
-                line = (
+                """line = (
                     f"{socket:6} | {power_w:4.2f} W |  {w_per_core:4.3f} W | "
                     f"{avg_mhz:4.0f} MHz | {uw_per_mhz:6.1f} µW/MHz"
+                )"""
+                line = (
+                    f"{socket:>{COL_SOCKET}} |"
+                    f"{cell(f'{power_w:7.2f}', 'W',           COL_PKG)} |"
+                    f"{cell(f'{w_per_core:7.3f}',  'W',       COL_CORE)} |"
+                    f"{cell(f'{avg_mhz:6.0f}',   'MHz',       COL_AVG_MHZ)} |"
+                    f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)}"
                 )
                 print(line)
                 printed_rows += 1
