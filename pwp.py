@@ -11,12 +11,13 @@ Outputs (per socket):
 Display modes
   default             – append rows forever
   -m / --max-lines N  – keep at most N data rows, then clear screen & redraw header
+  -M, --no-max        - continuously print without clearing screen
   -f / --fullscreen   – rewrite the same rows in-place (no vertical growth)
   --json (-j)         – emit one JSON object per sample (machine-readable)
 
 Normalisation
-  default            – divide by physical cores (best when SMT is on)
-  --logical / -l     – divide by logical threads instead
+  default             – divide by physical cores (best when SMT is on)
+  --logical / -l      – divide by logical threads instead
 
 Examples
   sudo python3 pwp
@@ -319,13 +320,19 @@ if __name__ == "__main__":
         action="store_true",
         help="output each sample as a JSON object (disables table modes)",
     )
-    parser.add_argument(
+    maxlines = parser.add_mutually_exclusive_group()
+    maxlines.add_argument(
         "-m", "--max-lines",
         type=int,
         metavar="N",
         default=20,
         help="print at most N lines, (default: 20) "
              "(table mode only)",
+    )
+    maxlines.add_argument(
+        "-M", "--no-max",
+        action="store_true",
+        help="Continuously print without clearing screen",
     )
     parser.add_argument(
         "-f", "--fullscreen",
@@ -338,6 +345,8 @@ if __name__ == "__main__":
         help="Do not roll output",
     )
     args = parser.parse_args()
+    if args.no_max:
+        args.max_lines = False
 
     try:
         sample(
