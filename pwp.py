@@ -9,10 +9,10 @@ Outputs (per socket):
   • Power per core per MHz (µW / MHz)
 
 Display modes
-  default        – append rows forever
-  --max-lines N  – keep at most N data rows, then clear screen & redraw header
-  --fullscreen   – rewrite the same rows in-place (no vertical growth)
-  --json (-j)    – emit one JSON object per sample (machine-readable)
+  default             – append rows forever
+  -m / --max-lines N  – keep at most N data rows, then clear screen & redraw header
+  -f / --fullscreen   – rewrite the same rows in-place (no vertical growth)
+  --json (-j)         – emit one JSON object per sample (machine-readable)
 
 Normalisation
   default            – divide by physical cores (best when SMT is on)
