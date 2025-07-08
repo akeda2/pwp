@@ -174,7 +174,7 @@ def sample(
         if fullscreen:
             clear_screen()
         print(header)
-        print("-" * len(header))
+        print("=" * len(header))
         printed_rows = 0
 
     while True:
@@ -241,7 +241,7 @@ def sample(
         elif max_lines and printed_rows >= max_lines:
             clear_screen()
             print(header)
-            print("-" * len(header))
+            print("=" * len(header))
             printed_rows = 0
 
         sys.stdout.flush()
