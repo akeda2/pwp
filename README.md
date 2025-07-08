@@ -1,7 +1,7 @@
 # pwp
 Read and print rapl values
 ## Usage
-usage: pwp [-h] [-l] [-j] [--max-lines N] [--fullscreen] [interval]  
+```usage: pwp [-h] [-l] [-j] [--max-lines N] [--fullscreen] [interval]  
                                                                      
 Lightweight RAPL power monitor (per socket/core/MHz).                
                                                                      
@@ -17,9 +17,9 @@ options:
   --max-lines N  print at most N data rows, then clear screen &      
                  redraw header (table mode only)                     
   --fullscreen   rewrite the same screenful in place (no vertical    
-                 growth)
+                 growth)```
 ## Output
-Socket |   Pkg W | W/p-core |  Avg MHz |        µW/MHz               
+```Socket |   Pkg W | W/p-core |  Avg MHz |        µW/MHz               
 ------------------------------------------------------               
      0 | 0.67 W |  0.333 W | 1686 MHz |  197.7 µW/MHz                
      0 | 2.26 W |  1.128 W | 1673 MHz |  673.8 µW/MHz                
@@ -31,3 +31,4 @@ Socket |   Pkg W | W/p-core |  Avg MHz |        µW/MHz
      0 | 2.20 W |  1.100 W | 2947 MHz |  373.2 µW/MHz                
      0 | 1.77 W |  0.884 W | 2306 MHz |  383.3 µW/MHz                
      0 | 1.76 W |  0.879 W | 2962 MHz |  296.7 µW/MHz
+```
