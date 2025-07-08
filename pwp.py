@@ -218,7 +218,7 @@ def sample(
         printed_rows = 0
 
     while True:
-        if no_roll or json:
+        if no_roll or json_mode:
             time.sleep(interval)
         now_ns = time.monotonic_ns()
         dt = (now_ns - last_time_ns) / 1e9
