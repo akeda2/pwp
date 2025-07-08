@@ -218,7 +218,7 @@ def sample(
         printed_rows = 0
 
     while True:
-        if no_roll:
+        if no_roll or json:
             time.sleep(interval)
         now_ns = time.monotonic_ns()
         dt = (now_ns - last_time_ns) / 1e9
@@ -315,11 +315,6 @@ if __name__ == "__main__":
         action="store_true",
         help="divide power by logical threads instead of physical cores",
     )
-    parser.add_argument(
-        "-j", "--json",
-        action="store_true",
-        help="output each sample as a JSON object (disables table modes)",
-    )
     maxlines = parser.add_mutually_exclusive_group()
     maxlines.add_argument(
         "-m", "--max-lines",
@@ -334,6 +329,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Continuously print without clearing screen",
     )
+    maxlines.add_argument(
+        "-j", "--json",
+        action="store_true",
+        help="output each sample as a JSON object (disables table modes)",
+    )
     parser.add_argument(
         "-f", "--fullscreen",
         action="store_true",
@@ -345,7 +345,7 @@ if __name__ == "__main__":
         help="Do not roll output",
     )
     args = parser.parse_args()
-    if args.no_max:
+    if args.no_max or args.json:
         args.max_lines = False
 
     try:
