@@ -2,7 +2,7 @@
 Read and print rapl values
 ## Usage
 ```
-akeda@fraktal:~/dev/pwp$ sudo pwp -h                                 usage: pwp [-h] [-l] [-j] [-m N] [--fullscreen] [interval]           
+usage: pwp [-h] [-l] [-j] [-m N] [--fullscreen] [interval]
                                                                      Lightweight RAPL power monitor (per socket/core/MHz).                
                                                                      positional arguments:                                                
   interval           sampling interval in seconds (default: 1.0)                                                                          
