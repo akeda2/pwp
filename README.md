@@ -2,7 +2,7 @@
 Read and print rapl values
 ## Usage
 ```
-usage: pwp [-h] [-l] [-j] [-m N] [--fullscreen] [interval]
+usage: pwp [-h] [-l] [-j] [-m N] [-f] [-N] [interval]
 
 Lightweight RAPL power monitor (per socket/core/MHz).
 
@@ -14,7 +14,8 @@ options:
   -l, --logical      divide power by logical threads instead of physical cores
   -j, --json         output each sample as a JSON object (disables table modes)
   -m, --max-lines N  print at most N lines, (default: 20) (table mode only)
-  --fullscreen       rewrite new data in place (no vertical growth)
+  -f, --fullscreen   rewrite new data in place (no vertical growth)
+  -N, --no-roll      Do not roll output
 ```
 ## Output
 ```
