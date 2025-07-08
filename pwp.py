@@ -142,7 +142,27 @@ def cursor_up(lines: int) -> None:
     if lines > 0:
         sys.stdout.write(CSI + f"{lines}A")
 
-
+def s_print(text, interval: float=1, delay: float=0.006):
+    # Prints text one character at a time, with a delay between each character
+    # If no-roll is used, it will print the whole line at once
+    
+    if interval > 4:
+        delay_interval = 4
+        interval_rest = interval - delay_interval
+    else:
+        delay_interval = interval
+    delay = delay_interval/56
+    """args_no_roll = parser.parse_args().no_roll
+    if args_no_roll:
+        print(text)
+        #return
+    else:"""
+    for char in text:
+        print(char, end='', flush=True)
+        time.sleep(delay)
+    print()
+    if interval > 4:
+        time.sleep(interval_rest)
 # --------------------------------------------------------------------------- #
 # Main sampling loop                                                          #
 # --------------------------------------------------------------------------- #
@@ -152,6 +172,7 @@ def sample(
     logical: bool,
     max_lines: int | None,
     fullscreen: bool,
+    no_roll: bool,
 ) -> None:
     if json_mode and (max_lines or fullscreen):
         raise SystemExit("JSON mode is incompatible with --max-lines / --fullscreen")
@@ -196,7 +217,8 @@ def sample(
         printed_rows = 0
 
     while True:
-        time.sleep(interval)
+        if no_roll:
+            time.sleep(interval)
         now_ns = time.monotonic_ns()
         dt = (now_ns - last_time_ns) / 1e9
         last_time_ns = now_ns
@@ -248,7 +270,10 @@ def sample(
                     f"{cell(f'{avg_mhz:6.0f}',   'MHz',       COL_AVG_MHZ)} |"
                     f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)}"
                 )
-                print(line)
+                if not no_roll:
+                    s_print(line, interval)
+                else:
+                    print(line)
                 printed_rows += 1
 
         if json_mode:
@@ -303,9 +328,14 @@ if __name__ == "__main__":
              "(table mode only)",
     )
     parser.add_argument(
-        "--fullscreen",
+        "-f", "--fullscreen",
         action="store_true",
         help="rewrite new data in place (no vertical growth)",
+    )
+    parser.add_argument(
+        "-N", "--no-roll",
+        action="store_true",
+        help="Do not roll output",
     )
     args = parser.parse_args()
 
@@ -316,6 +346,7 @@ if __name__ == "__main__":
             logical=args.logical,
             max_lines=args.max_lines,
             fullscreen=args.fullscreen,
+            no_roll=args.no_roll,
         )
     except KeyboardInterrupt:
         pass
