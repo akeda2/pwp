@@ -221,7 +221,7 @@ def sample(
             else:
                 line = (
                     f"{socket:6} | {power_w:4.2f} W |  {w_per_core:4.3f} W | "
-                    f"{avg_mhz:4.0f} MHz | {uw_per_mhz:5.1f} µW/MHz"
+                    f"{avg_mhz:4.0f} MHz | {uw_per_mhz:6.1f} µW/MHz"
                 )
                 print(line)
                 printed_rows += 1
