@@ -273,6 +273,7 @@ if __name__ == "__main__":
         "--max-lines",
         type=int,
         metavar="N",
+        default=20,
         help="print at most N data rows, then clear screen & redraw header "
              "(table mode only)",
     )
