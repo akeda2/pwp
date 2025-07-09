@@ -273,9 +273,10 @@ def sample(
                 )
                 if not no_roll:
                     print(pkgs)
-                    if len(pkgs) > 0:
-                        interval /= len(pkgs)
-                    s_print(line, interval)
+                    pkg_interval = interval
+                    if len(pkgs) > 2:
+                        pkg_interval /= len(pkgs)
+                    s_print(line, pkg_interval)
                 else:
                     print(line)
                 printed_rows += 1
