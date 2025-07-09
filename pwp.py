@@ -353,6 +353,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.no_max or args.json:
         args.max_lines = False
+    if args.fullscreen:
+        args.no_roll = True
 
     try:
         sample(
