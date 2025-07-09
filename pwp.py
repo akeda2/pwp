@@ -272,6 +272,9 @@ def sample(
                     f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)}"
                 )
                 if not no_roll:
+                    print(pkgs)
+                    if len(pkgs) > 0:
+                        interval /= len(pkgs)
                     s_print(line, interval)
                 else:
                     print(line)
