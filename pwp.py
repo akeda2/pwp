@@ -76,7 +76,7 @@ def list_packages() -> List[str]:
                     pkgs.append(zone)
         except FileNotFoundError:
             continue
-    return pkgs
+    return pkgs[::-1]
 
 
 def threads_and_physical_cores_by_socket() -> tuple[
@@ -273,7 +273,8 @@ def sample(
                 )
                 if not no_roll:
                     pkg_interval = interval
-                    #print(len(pkgs))
+                    #print(pkgs)
+                    #print(pkg)
                     if len(pkgs) > 1:
                         #print(pkgs)
                         pkg_interval /= len(pkgs)
