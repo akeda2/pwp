@@ -76,7 +76,8 @@ def list_packages() -> List[str]:
                     pkgs.append(zone)
         except FileNotFoundError:
             continue
-    return pkgs[::-1]
+    #return pkgs[::-1]
+    return sorted(pkgs)
 
 
 def threads_and_physical_cores_by_socket() -> tuple[
@@ -183,9 +184,12 @@ def sample(
         raise RuntimeError("No RAPL package zones found – is this an Intel CPU?")
 
     fds = {pkg: os.open(os.path.join(pkg, "energy_uj"), os.O_RDONLY) for pkg in pkgs}
+    #time.sleep(interval)
     ranges = {pkg: read_max_range_uj(pkg) for pkg in pkgs}
-    last_energy = {pkg: read_energy_uj(fd) for pkg, fd in fds.items()}
-    last_time_ns = time.monotonic_ns()
+    #last_energy = {pkg: read_energy_uj(fd) for pkg, fd in fds.items()}
+    last_energy = {pkg: read_energy_uj(fds[pkg]) for pkg in pkgs}
+    #last_time_ns = time.monotonic_ns()
+    last_time_ns = {pkg: time.monotonic_ns() for pkg in pkgs}
 
     threads_map, phys_map = threads_and_physical_cores_by_socket()
 
@@ -217,15 +221,20 @@ def sample(
         print("=" * len(header))
         printed_rows = 0
 
+    # Sleep if it's the first iteration
     first = True
+
     while True:
-        if no_roll or json_mode or first:
+        if first:
             time.sleep(interval)
             first = False
+        if no_roll or json_mode:
+            time.sleep(interval)
         now_ns = time.monotonic_ns()
-        dt = (now_ns - last_time_ns) / 1e9
-        last_time_ns = now_ns
-
+        #dt = (now_ns - last_time_ns) / 1e9
+        #last_time_ns = now_ns
+        #last_energy = {}
+        #last_time_ns = {}
         measurements = {}
         for pkg in pkgs:
             new_energy = read_energy_uj(fds[pkg])
@@ -235,6 +244,10 @@ def sample(
                 new_energy += rng
             diff_j = (new_energy - old_energy) / 1e6
             last_energy[pkg] = new_energy
+
+            dt = (now_ns - last_time_ns[pkg]) / 1e9 # NEW
+            last_time_ns[pkg] = now_ns  # NEW
+
             power_w = diff_j / dt
 
             socket = int(pkg.split(":")[1].split("/")[0])
