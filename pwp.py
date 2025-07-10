@@ -208,7 +208,7 @@ def sample(
         f"{'Avg MHz':>{COL_AVG_MHZ}} |"
         f"{'µW/MHz':>{COL_UW_MHZ}} |"
         f"{'kWh/d':>{COL_KW_HOUR}} |"
-        f"{'Cost/day':>{COL_COST_DAY}}"
+        f"{'Cost/d':>{COL_COST_DAY}}"
     )
 
     if not json_mode:
