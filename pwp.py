@@ -49,7 +49,7 @@ COL_CORE     = 9   # "  12.345 W"
 COL_AVG_MHZ  = 9   # "  4200 MHz"
 COL_UW_MHZ   = 14   # " 1234.5 µW/MHz"
 COL_KW_HOUR  = 12  # "  0.123 kWh/d"
-COL_COST_DAY = 7   # "  0.12 day"
+COL_COST_DAY = 8   # "  1.12 /d"
 
 _cpu_re = re.compile(r"cpu(\d+)")
 CSI = "\033["  # ANSI control-sequence introducer
