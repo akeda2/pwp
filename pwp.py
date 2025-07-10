@@ -46,8 +46,10 @@ CPU_TOPOLOGY_GLOB = "/sys/devices/system/cpu/cpu[0-9]*"
 COL_SOCKET   = 6
 COL_PKG      = 9   # "9999.99 W"
 COL_CORE     = 9   # "  12.345 W"
-COL_AVG_MHZ  = 10   # "  4200 MHz"
+COL_AVG_MHZ  = 9   # "  4200 MHz"
 COL_UW_MHZ   = 14   # " 1234.5 µW/MHz"
+COL_KW_HOUR  = 12  # "  0.123 kWh/d"
+COL_COST_DAY = 7   # "  0.12 day"
 
 _cpu_re = re.compile(r"cpu(\d+)")
 CSI = "\033["  # ANSI control-sequence introducer
@@ -131,6 +133,8 @@ def read_freq_khz(cpu: int) -> int:
             continue
     return 0  # cpufreq not available
 
+def calculate_kwh_per_day(power_w: float) -> float:
+    return power_w * 24 / 1000 
 
 # --------------------------------------------------------------------------- #
 # Terminal helpers                                                            #
@@ -145,19 +149,14 @@ def cursor_up(lines: int) -> None:
 
 def s_print(text, interval: float=1, delay: float=0.006):
     # Prints text one character at a time, with a delay between each character
-    # If no-roll is used, it will print the whole line at once
     
     if interval > 4:
         delay_interval = 4
         interval_rest = interval - delay_interval
     else:
         delay_interval = interval
-    delay = delay_interval/56
-    """args_no_roll = parser.parse_args().no_roll
-    if args_no_roll:
-        print(text)
-        #return
-    else:"""
+    delay = delay_interval/79
+
     for char in text:
         print(char, end='', flush=True)
         time.sleep(delay)
@@ -207,7 +206,9 @@ def sample(
         f"{'Pkg W':>{COL_PKG}} |"
         f"{'W/' + core_label:>{COL_CORE}} |"
         f"{'Avg MHz':>{COL_AVG_MHZ}} |"
-        f"{'µW/MHz':>{COL_UW_MHZ}}"
+        f"{'µW/MHz':>{COL_UW_MHZ}} |"
+        f"{'kWh/d':>{COL_KW_HOUR}} |"
+        f"{'Cost/day':>{COL_COST_DAY}}"
     )
 
     if not json_mode:
@@ -254,12 +255,17 @@ def sample(
             w_per_core = power_w / ncores
             uw_per_mhz = (w_per_core * 1e6) / avg_mhz if avg_mhz else 0
 
+            kwh_per_day = calculate_kwh_per_day(power_w)
+            cost_per_day = kwh_per_day * args.cost
+
             if json_mode:
                 measurements[str(socket)] = {
                     "pkg_w": round(power_w, 3),
                     "w_per_core": round(w_per_core, 4),
                     "avg_mhz": round(avg_mhz),
                     "uw_per_mhz": round(uw_per_mhz, 1),
+                    "kwh_per_day": round(kwh_per_day, 3),
+                    "cost_per_day": round(cost_per_day, 3),
                 }
             else:
                 """line = (
@@ -268,10 +274,12 @@ def sample(
                 )"""
                 line = (
                     f"{socket:>{COL_SOCKET}} |"
-                    f"{cell(f'{power_w:7.2f}', 'W',           COL_PKG)} |"
-                    f"{cell(f'{w_per_core:7.3f}',  'W',       COL_CORE)} |"
-                    f"{cell(f'{avg_mhz:6.0f}',   'MHz',       COL_AVG_MHZ)} |"
-                    f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)}"
+                    f"{cell(f'{power_w:5.2f}', 'W',           COL_PKG)} |"
+                    f"{cell(f'{w_per_core:5.3f}',  'W',       COL_CORE)} |"
+                    f"{cell(f'{avg_mhz:4.0f}',   'MHz',       COL_AVG_MHZ)} |"
+                    f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)} |"
+                    f"{cell(f'{kwh_per_day:5.3f}', 'kWh/d',   COL_KW_HOUR)} |"
+                    f"{cell(f'{cost_per_day:5.2f}', '/d',   COL_COST_DAY)}"
                 )
                 if not no_roll:
                     pkg_interval = interval
@@ -352,6 +360,13 @@ if __name__ == "__main__":
         "-N", "--no-roll",
         action="store_true",
         help="Do not roll output",
+    )
+    parser.add_argument(
+        "-c", "--cost",
+        type=float,
+        metavar="COST_PER_KWH",
+        default=1.0,
+        help="Cost per kWh in your currency (default: 1.0)",
     )
     args = parser.parse_args()
     if args.no_max or args.json:
