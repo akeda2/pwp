@@ -365,8 +365,8 @@ if __name__ == "__main__":
         "-c", "--cost",
         type=float,
         metavar="COST_PER_KWH",
-        default=1.0,
-        help="Cost per kWh in your currency (default: 1.0)",
+        default=1.5,
+        help="Cost per kWh in your currency (default: 1.5)",
     )
     args = parser.parse_args()
     if args.no_max or args.json:
