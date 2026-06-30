@@ -41,6 +41,8 @@ from typing import Dict, List
 
 ENERGY_PATH_GLOB = "/sys/class/powercap/intel-rapl/intel-rapl:*"
 CPU_TOPOLOGY_GLOB = "/sys/devices/system/cpu/cpu[0-9]*"
+FREQ_SCALE_PATH = "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq"
+FREQ_INFO_PATH = "/sys/devices/system/cpu/cpu{}/cpufreq/cpuinfo_cur_freq"
 
 # ------- fixed column widths (incl. units) ---------------------------------
 COL_SOCKET   = 6
@@ -78,7 +80,8 @@ def list_packages() -> List[str]:
                     pkgs.append(zone)
         except FileNotFoundError:
             continue
-    return pkgs[::-1]
+    # Keep package output stable across boots by sorting on socket id.
+    return sorted(pkgs, key=lambda p: int(p.rsplit(":", 1)[1]))
 
 
 def threads_and_physical_cores_by_socket() -> tuple[
@@ -107,7 +110,8 @@ def threads_and_physical_cores_by_socket() -> tuple[
         threads[socket].append(cpu)
         phys[socket].add(core_id)
 
-    return threads, phys
+    # Ensure deterministic CPU ordering per socket.
+    return {s: sorted(cpus) for s, cpus in threads.items()}, phys
 
 
 def read_energy_uj(fd: int) -> int:
@@ -122,8 +126,8 @@ def read_max_range_uj(zone: str) -> int:
 
 def read_freq_khz(cpu: int) -> int:
     paths = [
-        f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/scaling_cur_freq",
-        f"/sys/devices/system/cpu/cpu{cpu}/cpufreq/cpuinfo_cur_freq",
+        FREQ_SCALE_PATH.format(cpu),
+        FREQ_INFO_PATH.format(cpu),
     ]
     for p in paths:
         try:
@@ -134,7 +138,70 @@ def read_freq_khz(cpu: int) -> int:
     return 0  # cpufreq not available
 
 def calculate_kwh_per_day(power_w: float) -> float:
-    return power_w * 24 / 1000 
+    return power_w * 24 / 1000
+
+
+def detect_freq_source(cpu: int) -> str:
+    if os.path.exists(FREQ_SCALE_PATH.format(cpu)):
+        return "scaling_cur_freq"
+    if os.path.exists(FREQ_INFO_PATH.format(cpu)):
+        return "cpuinfo_cur_freq"
+    return "unavailable"
+
+
+def print_self_check(
+    pkgs: List[str],
+    threads_map: Dict[int, List[int]],
+    phys_map: Dict[int, set[int]],
+    logical: bool,
+    json_mode: bool,
+) -> None:
+    out = sys.stderr if json_mode else sys.stdout
+    print("[self-check] topology and sensor summary", file=out)
+    print(f"  sockets detected: {len(pkgs)}", file=out)
+    print(f"  normalisation: {'logical threads' if logical else 'physical cores'}", file=out)
+    for pkg in pkgs:
+        socket = int(pkg.rsplit(":", 1)[1])
+        cpus = threads_map.get(socket, [])
+        phys = phys_map.get(socket, set())
+        sample_cpu = cpus[0] if cpus else None
+        freq_src = detect_freq_source(sample_cpu) if sample_cpu is not None else "unavailable"
+        print(
+            f"  socket {socket}: threads={len(cpus)}, phys_cores={len(phys)}, "
+            f"freq_source={freq_src}, rapl_zone={pkg}",
+            file=out,
+        )
+
+
+def percentile(values: List[float], p: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = int((len(ordered) - 1) * p / 100.0)
+    return ordered[idx]
+
+
+def print_benchmark_summary(
+    samples_ms: List[float],
+    sockets: int,
+    json_mode: bool,
+    fullscreen: bool,
+    no_roll: bool,
+) -> None:
+    if not samples_ms:
+        return
+    out = sys.stderr if json_mode else sys.stdout
+    mode = "json" if json_mode else ("fullscreen" if fullscreen else ("no-roll" if no_roll else "rolling"))
+    avg_ms = sum(samples_ms) / len(samples_ms)
+    min_ms = min(samples_ms)
+    max_ms = max(samples_ms)
+    p95_ms = percentile(samples_ms, 95)
+    print("[benchmark] sampling loop timing (includes sensor reads + formatting/output)", file=out)
+    print(
+        f"  samples={len(samples_ms)} mode={mode} sockets={sockets} "
+        f"avg={avg_ms:.3f}ms p95={p95_ms:.3f}ms min={min_ms:.3f}ms max={max_ms:.3f}ms",
+        file=out,
+    )
 
 # --------------------------------------------------------------------------- #
 # Terminal helpers                                                            #
@@ -147,15 +214,17 @@ def cursor_up(lines: int) -> None:
     if lines > 0:
         sys.stdout.write(CSI + f"{lines}A")
 
-def s_print(text, interval: float=1, delay: float=0.006):
+def s_print(text: str, interval: float = 1) -> None:
     # Prints text one character at a time, with a delay between each character
-    
+
     if interval > 4:
         delay_interval = 4
         interval_rest = interval - delay_interval
     else:
         delay_interval = interval
-    delay = delay_interval/79
+
+    # Keep total typewriter delay close to the requested interval.
+    delay = delay_interval / max(len(text), 1)
 
     for char in text:
         print(char, end='', flush=True)
@@ -173,6 +242,9 @@ def sample(
     max_lines: int | None,
     fullscreen: bool,
     no_roll: bool,
+    cost_per_kwh: float,
+    self_check: bool,
+    benchmark_samples: int,
 ) -> None:
     if json_mode and (max_lines or fullscreen):
         raise SystemExit("JSON mode is incompatible with --max-lines / --fullscreen")
@@ -187,6 +259,8 @@ def sample(
     last_time_ns = time.monotonic_ns()
 
     threads_map, phys_map = threads_and_physical_cores_by_socket()
+    if self_check:
+        print_self_check(pkgs, threads_map, phys_map, logical, json_mode)
 
     # SMT hint when user chooses logical mode
     hyper = any(len(threads_map[s]) > len(phys_map[s]) for s in threads_map)
@@ -218,101 +292,118 @@ def sample(
         print("=" * len(header))
         printed_rows = 0
 
-    first = True
-    while True:
-        if no_roll or json_mode or first:
-            time.sleep(interval)
-            first = False
-        now_ns = time.monotonic_ns()
-        dt = (now_ns - last_time_ns) / 1e9
-        last_time_ns = now_ns
+    try:
+        first = True
+        iteration_times_ms: List[float] = []
+        while True:
+            iter_start_ns = time.monotonic_ns()
+            if no_roll or json_mode or first:
+                time.sleep(interval)
+                first = False
+            now_ns = time.monotonic_ns()
+            dt = (now_ns - last_time_ns) / 1e9
+            last_time_ns = now_ns
 
-        measurements = {}
-        for pkg in pkgs:
-            new_energy = read_energy_uj(fds[pkg])
-            old_energy = last_energy[pkg]
-            rng = ranges[pkg]
-            if new_energy < old_energy:  # wrap-around
-                new_energy += rng
-            diff_j = (new_energy - old_energy) / 1e6
-            last_energy[pkg] = new_energy
-            power_w = diff_j / dt
+            measurements = {}
+            lines_to_print = []
+            for pkg in pkgs:
+                new_energy = read_energy_uj(fds[pkg])
+                old_energy = last_energy[pkg]
+                rng = ranges[pkg]
+                if new_energy < old_energy:  # wrap-around
+                    new_energy += rng
+                diff_j = (new_energy - old_energy) / 1e6
+                last_energy[pkg] = new_energy
+                power_w = diff_j / dt
 
-            socket = int(pkg.split(":")[1].split("/")[0])
-            logical_list = threads_map.get(socket, [])
-            phys_set = phys_map.get(socket, set())
+                socket = int(pkg.rsplit(":", 1)[1])
+                logical_list = threads_map.get(socket, [])
+                phys_set = phys_map.get(socket, set())
 
-            ncores = len(logical_list) if logical else len(phys_set)
-            ncores = ncores or 1  # avoid div-zero
+                ncores = len(logical_list) if logical else len(phys_set)
+                ncores = ncores or 1  # avoid div-zero
 
-            freqs_mhz = [
-                read_freq_khz(c) / 1000
-                for c in logical_list
-                if read_freq_khz(c)
-            ]
-            avg_mhz = sum(freqs_mhz) / len(freqs_mhz) if freqs_mhz else 0
+                freqs_mhz = []
+                for cpu in logical_list:
+                    freq_khz = read_freq_khz(cpu)
+                    if freq_khz:
+                        freqs_mhz.append(freq_khz / 1000)
+                avg_mhz = sum(freqs_mhz) / len(freqs_mhz) if freqs_mhz else 0
 
-            w_per_core = power_w / ncores
-            uw_per_mhz = (w_per_core * 1e6) / avg_mhz if avg_mhz else 0
+                w_per_core = power_w / ncores
+                uw_per_mhz = (w_per_core * 1e6) / avg_mhz if avg_mhz else 0
 
-            kwh_per_day = calculate_kwh_per_day(power_w)
-            cost_per_day = kwh_per_day * args.cost
+                kwh_per_day = calculate_kwh_per_day(power_w)
+                cost_per_day = kwh_per_day * cost_per_kwh
 
-            if json_mode:
-                measurements[str(socket)] = {
-                    "pkg_w": round(power_w, 3),
-                    "w_per_core": round(w_per_core, 4),
-                    "avg_mhz": round(avg_mhz),
-                    "uw_per_mhz": round(uw_per_mhz, 1),
-                    "kwh_per_day": round(kwh_per_day, 3),
-                    "cost_per_day": round(cost_per_day, 3),
-                }
-            else:
-                """line = (
-                    f"{socket:6} | {power_w:4.2f} W |  {w_per_core:4.3f} W | "
-                    f"{avg_mhz:4.0f} MHz | {uw_per_mhz:6.1f} µW/MHz"
-                )"""
-                line = (
-                    f"{socket:>{COL_SOCKET}} |"
-                    f"{cell(f'{power_w:5.2f}', 'W',           COL_PKG)} |"
-                    f"{cell(f'{w_per_core:5.3f}',  'W',       COL_CORE)} |"
-                    f"{cell(f'{avg_mhz:4.0f}',   'MHz',       COL_AVG_MHZ)} |"
-                    f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)} |"
-                    f"{cell(f'{kwh_per_day:5.3f}', 'kWh/d',   COL_KW_HOUR)} |"
-                    f"{cell(f'{cost_per_day:5.2f}', '/d',   COL_COST_DAY)}"
-                )
+                if json_mode:
+                    measurements[str(socket)] = {
+                        "pkg_w": round(power_w, 3),
+                        "w_per_core": round(w_per_core, 4),
+                        "avg_mhz": round(avg_mhz),
+                        "uw_per_mhz": round(uw_per_mhz, 1),
+                        "kwh_per_day": round(kwh_per_day, 3),
+                        "cost_per_day": round(cost_per_day, 3),
+                    }
+                else:
+                    line = (
+                        f"{socket:>{COL_SOCKET}} |"
+                        f"{cell(f'{power_w:5.2f}', 'W',           COL_PKG)} |"
+                        f"{cell(f'{w_per_core:5.3f}',  'W',       COL_CORE)} |"
+                        f"{cell(f'{avg_mhz:4.0f}',   'MHz',       COL_AVG_MHZ)} |"
+                        f"{cell(f'{uw_per_mhz:7.1f}',  'µW/MHz',  COL_UW_MHZ)} |"
+                        f"{cell(f'{kwh_per_day:5.3f}', 'kWh/d',   COL_KW_HOUR)} |"
+                        f"{cell(f'{cost_per_day:5.2f}', '/d',   COL_COST_DAY)}"
+                    )
+                    lines_to_print.append(line)
+
+            if not json_mode:
                 if not no_roll:
                     pkg_interval = interval
-                    #print(pkgs)
-                    #print(pkg)
-                    if len(pkgs) > 1:
-                        #print(pkgs)
-                        pkg_interval /= len(pkgs)
-                        #print(pkg_interval)
-                    s_print(line, pkg_interval)
+                    if len(lines_to_print) > 1:
+                        pkg_interval /= len(lines_to_print)
+                    for line in lines_to_print:
+                        s_print(line, pkg_interval)
                 else:
-                    print(line)
-                printed_rows += 1
+                    for line in lines_to_print:
+                        print(line)
+                printed_rows += len(lines_to_print)
 
-        if json_mode:
-            blob = {
-                "timestamp": time.time(),
-                "interval": interval,
-                "core_mode": "logical" if logical else "physical",
-                "sockets": measurements,
-            }
-            print(json.dumps(blob))
+            if json_mode:
+                blob = {
+                    "timestamp": time.time(),
+                    "interval": interval,
+                    "core_mode": "logical" if logical else "physical",
+                    "sockets": measurements,
+                }
+                print(json.dumps(blob))
 
-        elif fullscreen:
-            cursor_up(len(pkgs))
+            elif fullscreen:
+                cursor_up(len(pkgs))
 
-        elif max_lines and printed_rows >= max_lines:
-            clear_screen()
-            print(header)
-            print("=" * len(header))
-            printed_rows = 0
+            elif max_lines and printed_rows >= max_lines:
+                clear_screen()
+                print(header)
+                print("=" * len(header))
+                printed_rows = 0
 
-        sys.stdout.flush()
+            sys.stdout.flush()
+
+            if benchmark_samples > 0:
+                iter_elapsed_ms = (time.monotonic_ns() - iter_start_ns) / 1e6
+                iteration_times_ms.append(iter_elapsed_ms)
+                if len(iteration_times_ms) >= benchmark_samples:
+                    print_benchmark_summary(
+                        iteration_times_ms,
+                        sockets=len(pkgs),
+                        json_mode=json_mode,
+                        fullscreen=fullscreen,
+                        no_roll=no_roll,
+                    )
+                    return
+    finally:
+        for fd in fds.values():
+            os.close(fd)
 
 
 # --------------------------------------------------------------------------- #
@@ -368,7 +459,21 @@ if __name__ == "__main__":
         default=1.5,
         help="Cost per kWh in your currency (default: 1.5)",
     )
+    parser.add_argument(
+        "--self-check",
+        action="store_true",
+        help="print detected topology/sensor summary before sampling",
+    )
+    parser.add_argument(
+        "--benchmark",
+        type=int,
+        metavar="N",
+        default=0,
+        help="run N iterations and print timing stats, then exit",
+    )
     args = parser.parse_args()
+    if args.benchmark < 0:
+        parser.error("--benchmark must be >= 0")
     if args.no_max or args.json:
         args.max_lines = False
     if args.fullscreen:
@@ -382,6 +487,9 @@ if __name__ == "__main__":
             max_lines=args.max_lines,
             fullscreen=args.fullscreen,
             no_roll=args.no_roll,
+            cost_per_kwh=args.cost,
+            self_check=args.self_check,
+            benchmark_samples=args.benchmark,
         )
     except KeyboardInterrupt:
         pass
