@@ -3,6 +3,7 @@ Read and print rapl values
 ## Usage
 ```
 usage: pwp.py [-h] [-l] [-m N | -M | -j] [-f] [-N] [-c COST_PER_KWH]
+              [--self-check] [--benchmark N]
               [interval]
 
 Lightweight RAPL power monitor (per socket/core/MHz).
@@ -20,6 +21,8 @@ options:
   -N, --no-roll      Do not roll output
   -c, --cost COST_PER_KWH
           Cost per kWh in your currency (default: 1.5)
+  --self-check       print detected topology/sensor summary before sampling
+  --benchmark N      run N iterations and print timing stats, then exit
 ```
 ## Output
 ```
