@@ -228,6 +228,7 @@ def sample(
         last_time_ns = now_ns
 
         measurements = {}
+        lines_to_print = []
         for pkg in pkgs:
             new_energy = read_energy_uj(fds[pkg])
             old_energy = last_energy[pkg]
@@ -281,18 +282,19 @@ def sample(
                     f"{cell(f'{kwh_per_day:5.3f}', 'kWh/d',   COL_KW_HOUR)} |"
                     f"{cell(f'{cost_per_day:5.2f}', '/d',   COL_COST_DAY)}"
                 )
-                if not no_roll:
-                    pkg_interval = interval
-                    #print(pkgs)
-                    #print(pkg)
-                    if len(pkgs) > 1:
-                        #print(pkgs)
-                        pkg_interval /= len(pkgs)
-                        #print(pkg_interval)
+                lines_to_print.append(line)
+
+        if not json_mode:
+            if not no_roll:
+                pkg_interval = interval
+                if len(lines_to_print) > 1:
+                    pkg_interval /= len(lines_to_print)
+                for line in lines_to_print:
                     s_print(line, pkg_interval)
-                else:
+            else:
+                for line in lines_to_print:
                     print(line)
-                printed_rows += 1
+            printed_rows += len(lines_to_print)
 
         if json_mode:
             blob = {
